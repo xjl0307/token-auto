@@ -1,5 +1,6 @@
+import requests
+from bs4 import BeautifulSoup
 import urllib.request
-import re
 import os
 import time
 from urllib.error import HTTPError, URLError
@@ -8,16 +9,16 @@ from urllib.error import HTTPError, URLError
 TARGET_URL = "https://taoiptv.com/"
 BASE_SUBSCRIBE_URL = "https://taoiptv.com/lives/50024.txt?token="
 OUTPUT_FILE = "cqlt.txt"
-DEBUG_HTML_FILE = "page_source.html"  # 保存页面源码用于调试
+DEBUG_FILE = "debug_info.txt"  # 调试信息文件
 
-# 👇 订阅文件中的真实分类名
+# 目标分类
 TARGET_CATEGORIES = [
     "央视频道",
     "卫视频道",
     "西南地区"
 ]
 
-# 请求头（模拟真实浏览器）
+# 增强版请求头（模拟真实浏览器）
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
@@ -25,76 +26,103 @@ HEADERS = {
     "Accept-Encoding": "gzip, deflate, br",
     "Connection": "keep-alive",
     "Upgrade-Insecure-Requests": "1",
-    "Cache-Control": "no-cache",
-    "Pragma": "no-cache"
+    "Cache-Control": "max-age=0",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="122", "Google Chrome";v="122"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"'
 }
+
+# 重试配置
+RETRY_TIMES = 5
+RETRY_DELAY = 3
 # ===================================================
 
-def get_token_by_http():
-    """纯HTTP请求+保存源码+多正则匹配"""
-    token = None
-    # 重试3次
-    for retry in range(3):
-        try:
-            print(f"🔗 第{retry+1}次尝试访问页面：{TARGET_URL}")
-            req = urllib.request.Request(TARGET_URL, headers=HEADERS)
-            with urllib.request.urlopen(req, timeout=30) as response:
-                content = response.read()
-                # 尝试多种编码解码
-                encodings = ['utf-8', 'gbk', 'gb2312', 'latin-1']
-                html = ""
-                for encoding in encodings:
-                    try:
-                        html = content.decode(encoding)
-                        print(f"✅ 使用{encoding}编码解码成功")
-                        break
-                    except:
-                        continue
-            
-            # 保存页面源码到文件（用于调试）
-            with open(DEBUG_HTML_FILE, "w", encoding="utf-8") as f:
-                f.write(html)
-            print(f"✅ 页面源码已保存到：{DEBUG_HTML_FILE}")
-            
-            # 打印源码前2000字符，快速查看结构
-            print(f"\n📝 页面源码前2000字符：\n{html[:2000]}\n")
-            
-            # 多种正则模式匹配Token（覆盖所有可能格式）
-            patterns = [
-                # 模式1：id="copyToken" 包含data-clipboard-text
-                r'id=["\']copyToken["\'][^>]*data-clipboard-text=["\']([^"\']+)["\']',
-                # 模式2：任意位置的data-clipboard-text
-                r'data-clipboard-text=["\']([a-zA-Z0-9]{16})["\']',
-                # 模式3：宽松匹配16位字母数字（不限制属性）
-                r'["\']([a-zA-Z0-9]{16})["\']',
-                # 模式4：copyToken按钮内的所有16位字符
-                r'copyToken[^>]*([a-zA-Z0-9]{16})'
-            ]
-            
-            for i, pattern in enumerate(patterns):
-                match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
-                if match:
-                    token_candidate = match.group(1).strip()
-                    # 验证Token格式（16位字母数字）
-                    if len(token_candidate) == 16 and token_candidate.isalnum():
-                        token = token_candidate
-                        print(f"✅ 模式{i+1}匹配到Token：{token}")
-                        return token
-                    else:
-                        print(f"⚠️ 模式{i+1}匹配到无效内容：{token_candidate}")
-            
-            print(f"⚠️ 第{retry+1}次未找到有效Token，重试中...")
-            time.sleep(2)
-        
-        except (HTTPError, URLError) as e:
-            print(f"⚠️ 第{retry+1}次请求失败：{e}")
-            time.sleep(2)
-        except Exception as e:
-            print(f"⚠️ 第{retry+1}次处理失败：{e}")
-            time.sleep(2)
+def get_token_by_bs4():
+    """使用requests+BeautifulSoup精准解析页面提取Token"""
+    session = requests.Session()
+    session.headers.update(HEADERS)
+    # 禁用SSL验证（避免GitHub Actions环境证书问题）
+    session.verify = False
     
-    print("❌ 所有尝试均失败，使用备用Token")
-    return "200c76359e543971"
+    token = None
+    debug_info = []
+    
+    for retry in range(RETRY_TIMES):
+        try:
+            debug_info.append(f"\n=== 第{retry+1}次尝试 ===")
+            debug_info.append(f"访问URL：{TARGET_URL}")
+            
+            # 发送请求（允许重定向，延长超时）
+            response = session.get(
+                TARGET_URL,
+                timeout=30,
+                allow_redirects=True,
+                stream=True
+            )
+            debug_info.append(f"响应状态码：{response.status_code}")
+            
+            # 处理编码
+            response.encoding = response.apparent_encoding or 'utf-8'
+            html = response.text
+            debug_info.append(f"页面编码：{response.encoding}")
+            debug_info.append(f"页面长度：{len(html)}字符")
+            
+            # 使用BeautifulSoup解析HTML
+            soup = BeautifulSoup(html, 'html.parser')
+            debug_info.append("HTML解析完成")
+            
+            # 多种方式查找按钮元素
+            # 方式1：通过id查找
+            copy_btn = soup.find(id="copyToken")
+            if copy_btn:
+                debug_info.append("找到id=copyToken的元素")
+                # 提取data-clipboard-text属性
+                token = copy_btn.get("data-clipboard-text", "").strip()
+                debug_info.append(f"提取到Token：{token}")
+            else:
+                # 方式2：查找所有包含data-clipboard-text的按钮
+                all_btns = soup.find_all(attrs={"data-clipboard-text": True})
+                debug_info.append(f"找到{len(all_btns)}个带data-clipboard-text的元素")
+                if all_btns:
+                    # 取第一个有效Token
+                    for btn in all_btns:
+                        temp_token = btn.get("data-clipboard-text", "").strip()
+                        if len(temp_token) == 16 and temp_token.isalnum():
+                            token = temp_token
+                            debug_info.append(f"从按钮提取到有效Token：{token}")
+                            break
+            
+            # 验证Token
+            if token and len(token) == 16 and token.isalnum():
+                debug_info.append(f"✅ 第{retry+1}次成功获取Token：{token}")
+                break
+            else:
+                debug_info.append(f"⚠️ 第{retry+1}次提取的Token无效：{token}")
+                token = None
+                time.sleep(RETRY_DELAY)
+        
+        except Exception as e:
+            error_msg = f"⚠️ 第{retry+1}次失败：{str(e)}"
+            debug_info.append(error_msg)
+            print(error_msg)
+            time.sleep(RETRY_DELAY)
+    
+    # 保存调试信息
+    with open(DEBUG_FILE, "w", encoding="utf-8") as f:
+        f.write("\n".join(debug_info))
+    print(f"✅ 调试信息已保存到：{DEBUG_FILE}")
+    
+    if not token:
+        print("❌ 所有尝试均失败，使用备用Token")
+        token = "200c76359e543971"
+    else:
+        print(f"✅ 成功获取今日Token：{token}")
+    
+    return token
 
 def filter_subscribe(token):
     """完美适配分类格式：分类名,#genre#"""
@@ -136,12 +164,16 @@ def filter_subscribe(token):
         return True
     
     except Exception as e:
-        print(f"❌ 处理失败：{e}")
+        print(f"❌ 处理订阅失败：{e}")
         return False
 
 if __name__ == "__main__":
-    print("===== 开始执行（调试版）=====")
-    token = get_token_by_http()
+    # 禁用requests警告
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    
+    print("===== 开始执行（BS4解析版）=====")
+    token = get_token_by_bs4()
     if token:
         filter_subscribe(token)
     print("===== 执行结束 =====")
