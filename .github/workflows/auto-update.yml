@@ -1,7 +1,7 @@
 name: 自动更新每日IPTV Token
 on:
   schedule:
-    - cron: '2 0/2 * * *'  # 每天0点执行
+    - cron: '3 0/2 * * *'  # 每天0点执行
   workflow_dispatch:
 
 permissions:
@@ -19,12 +19,8 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: 安装Playwright
-        run: |
-          python -m pip install playwright
-          playwright install chromium --with-deps
-
-      - name: 执行脚本
+      # 👇 无需安装Playwright！
+      - name: 执行脚本（纯HTTP，无浏览器依赖）
         run: python get_token.py
 
       - name: 提交文件
