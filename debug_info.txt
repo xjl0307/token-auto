@@ -1,0 +1,45 @@
+
+=== 第1次尝试 ===
+访问URL：https://taoiptv.com/
+响应状态码：200
+页面编码：utf-8
+页面长度：1259字符
+HTML解析完成
+找到0个带data-clipboard-text的元素
+⚠️ 第1次提取的Token无效：None
+
+=== 第2次尝试 ===
+访问URL：https://taoiptv.com/
+响应状态码：200
+页面编码：utf-8
+页面长度：1259字符
+HTML解析完成
+找到0个带data-clipboard-text的元素
+⚠️ 第2次提取的Token无效：None
+
+=== 第3次尝试 ===
+访问URL：https://taoiptv.com/
+响应状态码：200
+页面编码：utf-8
+页面长度：1259字符
+HTML解析完成
+找到0个带data-clipboard-text的元素
+⚠️ 第3次提取的Token无效：None
+
+=== 第4次尝试 ===
+访问URL：https://taoiptv.com/
+响应状态码：200
+页面编码：utf-8
+页面长度：1259字符
+HTML解析完成
+找到0个带data-clipboard-text的元素
+⚠️ 第4次提取的Token无效：None
+
+=== 第5次尝试 ===
+访问URL：https://taoiptv.com/
+响应状态码：200
+页面编码：utf-8
+页面长度：1259字符
+HTML解析完成
+找到0个带data-clipboard-text的元素
+⚠️ 第5次提取的Token无效：None
