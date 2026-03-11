@@ -8,6 +8,7 @@ from urllib.error import HTTPError, URLError
 TARGET_URL = "https://taoiptv.com/"
 BASE_SUBSCRIBE_URL = "https://taoiptv.com/lives/50024.txt?token="
 OUTPUT_FILE = "cqlt.txt"
+DEBUG_HTML_FILE = "page_source.html"  # 保存页面源码用于调试
 
 # 👇 订阅文件中的真实分类名
 TARGET_CATEGORIES = [
@@ -30,46 +31,60 @@ HEADERS = {
 # ===================================================
 
 def get_token_by_http():
-    """纯HTTP请求+正则匹配Token，无浏览器依赖"""
+    """纯HTTP请求+保存源码+多正则匹配"""
     token = None
-    # 重试3次，提升成功率
+    # 重试3次
     for retry in range(3):
         try:
             print(f"🔗 第{retry+1}次尝试访问页面：{TARGET_URL}")
-            # 创建请求对象
             req = urllib.request.Request(TARGET_URL, headers=HEADERS)
-            # 设置超时时间
             with urllib.request.urlopen(req, timeout=30) as response:
-                # 读取页面源码（自动解压gzip）
                 content = response.read()
-                # 尝试解码
-                try:
-                    html = content.decode('utf-8')
-                except:
-                    html = content.decode('gbk', errors='ignore')
+                # 尝试多种编码解码
+                encodings = ['utf-8', 'gbk', 'gb2312', 'latin-1']
+                html = ""
+                for encoding in encodings:
+                    try:
+                        html = content.decode(encoding)
+                        print(f"✅ 使用{encoding}编码解码成功")
+                        break
+                    except:
+                        continue
             
-            print("✅ 页面源码获取成功")
+            # 保存页面源码到文件（用于调试）
+            with open(DEBUG_HTML_FILE, "w", encoding="utf-8") as f:
+                f.write(html)
+            print(f"✅ 页面源码已保存到：{DEBUG_HTML_FILE}")
             
-            # 核心：正则匹配data-clipboard-text属性中的Token
-            # 适配你的页面结构：id="copyToken" data-clipboard-text="16位Token"
-            pattern = r'id="copyToken"[^>]*data-clipboard-text="([a-zA-Z0-9]{16})"'
-            match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+            # 打印源码前2000字符，快速查看结构
+            print(f"\n📝 页面源码前2000字符：\n{html[:2000]}\n")
             
-            if match:
-                token = match.group(1).strip()
-                print(f"✅ 成功获取今日Token：{token}")
-                return token
-            else:
-                # 备用正则：直接匹配data-clipboard-text属性
-                pattern_backup = r'data-clipboard-text="([a-zA-Z0-9]{16})"'
-                match_backup = re.search(pattern_backup, html, re.IGNORECASE | re.DOTALL)
-                if match_backup:
-                    token = match_backup.group(1).strip()
-                    print(f"✅ 备用正则匹配到Token：{token}")
-                    return token
-                else:
-                    print(f"⚠️ 第{retry+1}次未找到Token，重试中...")
-                    time.sleep(2)  # 等待2秒重试
+            # 多种正则模式匹配Token（覆盖所有可能格式）
+            patterns = [
+                # 模式1：id="copyToken" 包含data-clipboard-text
+                r'id=["\']copyToken["\'][^>]*data-clipboard-text=["\']([^"\']+)["\']',
+                # 模式2：任意位置的data-clipboard-text
+                r'data-clipboard-text=["\']([a-zA-Z0-9]{16})["\']',
+                # 模式3：宽松匹配16位字母数字（不限制属性）
+                r'["\']([a-zA-Z0-9]{16})["\']',
+                # 模式4：copyToken按钮内的所有16位字符
+                r'copyToken[^>]*([a-zA-Z0-9]{16})'
+            ]
+            
+            for i, pattern in enumerate(patterns):
+                match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+                if match:
+                    token_candidate = match.group(1).strip()
+                    # 验证Token格式（16位字母数字）
+                    if len(token_candidate) == 16 and token_candidate.isalnum():
+                        token = token_candidate
+                        print(f"✅ 模式{i+1}匹配到Token：{token}")
+                        return token
+                    else:
+                        print(f"⚠️ 模式{i+1}匹配到无效内容：{token_candidate}")
+            
+            print(f"⚠️ 第{retry+1}次未找到有效Token，重试中...")
+            time.sleep(2)
         
         except (HTTPError, URLError) as e:
             print(f"⚠️ 第{retry+1}次请求失败：{e}")
@@ -78,7 +93,6 @@ def get_token_by_http():
             print(f"⚠️ 第{retry+1}次处理失败：{e}")
             time.sleep(2)
     
-    # 所有重试失败，使用备用Token
     print("❌ 所有尝试均失败，使用备用Token")
     return "200c76359e543971"
 
@@ -88,7 +102,6 @@ def filter_subscribe(token):
     print(f"\n🔗 订阅地址：{full_url}")
     
     try:
-        # 下载订阅文件
         req = urllib.request.Request(full_url, headers=HEADERS)
         with urllib.request.urlopen(req, timeout=20) as response:
             content = response.read().decode('utf-8', errors='ignore')
@@ -101,12 +114,10 @@ def filter_subscribe(token):
         in_target_category = False
         
         for line in lines:
-            # 识别分类行：格式为「分类名,#genre#」
             if ",#genre#" in line:
                 current_cate = line.replace(",#genre#", "").strip()
                 if current_cate in TARGET_CATEGORIES:
                     in_target_category = True
-                    # 转换为标准格式：#genre# 分类名
                     filtered_lines.append(f"#genre# {current_cate}")
                     print(f"\n✅ 匹配分类：{current_cate}")
                 else:
@@ -122,10 +133,6 @@ def filter_subscribe(token):
         print(f"\n✅ 筛选完成！")
         print(f"📂 生成文件：{OUTPUT_FILE}")
         print(f"📊 有效行数：{len(filtered_lines)}")
-        print(f"\n📋 内容预览：")
-        for i, line in enumerate(filtered_lines[:20]):
-            print(f"   {i+1}. {line}")
-        
         return True
     
     except Exception as e:
@@ -133,7 +140,7 @@ def filter_subscribe(token):
         return False
 
 if __name__ == "__main__":
-    print("===== 开始执行（纯HTTP稳定版）=====")
+    print("===== 开始执行（调试版）=====")
     token = get_token_by_http()
     if token:
         filter_subscribe(token)
