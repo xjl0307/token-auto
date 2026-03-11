@@ -19,15 +19,14 @@ jobs:
         with:
           python-version: '3.11'
 
-      # 👇 无需安装Playwright！
-      - name: 执行脚本（纯HTTP，无浏览器依赖）
+      - name: 执行脚本（带调试）
         run: python get_token.py
 
-      - name: 提交文件
+      - name: 提交所有文件（含调试文件）
         run: |
           git config --local user.name "GitHub Action"
           git config --local user.email "action@github.com"
-          git add cqlt.txt
+          git add cqlt.txt page_source.html || true
           git commit -m "自动更新IPTV订阅 $(date '+%Y-%m-%d %H:%M:%S')" || echo "无变化"
           git push
         env:
